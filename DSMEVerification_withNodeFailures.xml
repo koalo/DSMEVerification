@@ -1,0 +1,1351 @@
+<?xml version="1.0" ?>
+<nta>
+	<declaration>const int NODES = 2;
+typedef int[0,NODES-1] Address;
+
+const bool improved = false;
+
+// Times are given in symbols
+const int CCA_DURATION = 8;
+const int SYMBOLS_PER_PACKET = 2*(2+4+1+1+20); // arbitrary size of 20 bytes, only relevant for Tmin
+const int CAP_QUEUE = 10;
+const int macMaxFrameTotalWaitTime = 1026; // for macMinBE = 3, macMaxBE = 5, macMaxCSMABackoffs = 4, 
+const int Tmin = CCA_DURATION+SYMBOLS_PER_PACKET; // minimum sending time 
+const int Tmax = CAP_QUEUE*2*macMaxFrameTotalWaitTime; // maximum sending time (*2 since CAP messages can not be sent during GTS phase)
+const int aNumSuperframeSlots = 16;
+const int aBaseSlotDuration = 60;
+const int SO = 3;
+//const int XXMO = 5;
+const int MO = 4;
+const int SYMBOLS_PER_SLOT = aBaseSlotDuration * (1 &lt;&lt; SO);
+const int SUPERFRAME_INTERVAL = SYMBOLS_PER_SLOT*aNumSuperframeSlots;
+const int aBaseSuperframeDuration = aBaseSlotDuration*aNumSuperframeSlots;
+const int macResponseWaitTime = 32*aBaseSuperframeDuration;
+const int SUPERFRAMES = 1 &lt;&lt; (MO - SO);
+//const int XXmacDSMEGTSExpirationTime = 7; // given in Multi-Superframes
+const int macDSMEGTSExpirationTime = 3; // given in Multi-Superframes
+const int T_MAXINCONS = macDSMEGTSExpirationTime*SUPERFRAMES*150/100;
+//const int XXT_MAXINCONS = 6;
+const int CFP_END = 9*SYMBOLS_PER_SLOT - SYMBOLS_PER_PACKET;
+typedef int [0,T_MAXINCONS*2] SuperframeCounter;
+
+// Allocation Counter Table (ACT) and Slot Allocation Bitmap (SAB)
+const int SLOTS = 1;
+typedef int [0,SLOTS-1] Slot;
+
+const int MAX_SAB_VALUE = (1 &lt;&lt; (SLOTS))-1;
+
+typedef int[0,MAX_SAB_VALUE] SAB; // bit vector, one for all slots that are occupied
+
+SAB negateSAB(SAB sab) {
+   return MAX_SAB_VALUE ^ sab;
+}
+
+const int ACT_FREE = 0;
+const int ACT_ALLOCATED = 1;
+const int ACT_INVALID = 2;
+const int ACT_UNCONFIRMED = 3;
+const int ACT_STATE_LEN = 4;
+typedef int[0,ACT_STATE_LEN-1] ACTState;
+
+typedef struct
+{
+  ACTState states[SLOTS];
+
+  // actually the idleCounter counts Multi-Superframes, instead counting superframes
+  // and multiplying macDSMEGTSExpirationTime with SUPERFRAMES during the comparison
+  // is equivalent, but much faster to analyze
+  int[0,macDSMEGTSExpirationTime*SUPERFRAMES] idleSuperframeCounter[SLOTS]; 
+
+  Address address[SLOTS];
+  SAB notFree; // for faster calculation
+} ACT;
+
+// GTS Status
+const int GTS_APPROVED = 0;
+const int GTS_DISAPPROVED = 1;
+const int GTS_INVALID_PARAMETER = 2;
+const int GTS_NO_ACK = 3;
+const int GTS_NO_DATA = 4;
+const int GTS_ACCESS_FAILURE = 5;
+const int GTS_NO_SHORT_ADDRESS = 6;
+const int GTS_TOO_LATE = 7; // not in the original standard
+const int GTS_X = 8; // not in the standard -&gt; only used for modeling the &quot;do not care&quot; of the request
+const int GTS_STATUS_LEN = 9;
+typedef int [0,GTS_STATUS_LEN-1] GTSStatus;
+
+// Comm Status
+const int COMM_SUCCESS = 0;
+const int COMM_ACCESS_FAILURE = 1;
+const int COMM_NO_ACK = 2;
+const int COMM_TRANSACTION_EXPIRED = 3;
+const int COMM_STATUS_LEN = 4;
+typedef int [0,COMM_STATUS_LEN-1] CommStatus;
+
+// CAP layer indications
+const int CAP_ACCESS_FAILURE = 0;
+const int CAP_SUCCESS = 1;
+const int CAP_NO_ACK = 2;
+const int CAP_STATUS_LEN = 3;
+typedef int [0,CAP_STATUS_LEN-1] CAPStatus;
+typedef chan CAPIndicationChannel[CAP_STATUS_LEN];
+
+// ACT Update Triggers
+const int ACT_REQUEST_ACCESS_FAILURE = 0;
+const int ACT_REQUEST_NO_ACK = 1;
+const int ACT_RESPONSE_TIMEOUT = 2;
+const int ACT_DISAPPROVED = 3;
+const int ACT_NOTIFY_ACCESS_FAILURE = 4;
+const int ACT_NOTIFY_DELIVERED = 5;
+const int ACT_DISAPPROVAL_ACCESS_FAILURE = 6;
+const int ACT_DISAPPROVAL_NO_ACK = 7;
+const int ACT_DISAPPROVAL_DELIVERED = 8;
+const int ACT_APPROVAL_ACCESS_FAILURE = 9;
+const int ACT_NOTIFY_TIMEOUT = 10;
+const int ACT_NOTIFY_RECEIVED = 11;
+const int ACT_TRIGGER_LEN = 12;
+typedef int [0,ACT_TRIGGER_LEN-1] ACTTrigger;
+
+// Management types
+const int MAN_DEALLOCATION = 0;
+const int MAN_ALLOCATION = 1;
+const int MAN_EXPIRATION = 2;
+const int MAN_LEN = 3;
+typedef int[0,MAN_LEN-1] ManType;
+
+// Command types
+const int REQUEST_CMD = 0;
+const int RESPONSE_CMD = 1;
+const int NOTIFY_CMD = 2;
+const int COMMAND_TYPES_LEN = 3;
+typedef int[0,COMMAND_TYPES_LEN-1] CommandType;
+
+// MLME
+typedef struct {
+  SAB sab;
+  GTSStatus gts_status;
+} MLME;
+
+typedef chan MLMERequest[MAN_LEN]; // MLME-DSME-GTS.request
+typedef chan MLMEIndication[MAN_LEN]; // MLME-DSME-GTS.indication
+typedef chan MLMEResponse[MAN_LEN]; // MLME-DSME-GTS.response
+typedef chan MLMEConfirm; // MLME-DSME-GTS.confirm
+typedef chan MLMECommStatus[COMM_STATUS_LEN]; // MLME-COMM-STATUS
+
+// CAP Message
+typedef struct {
+  GTSStatus status;
+  Address address;
+  CommandType cmd;
+  ManType man;
+  SAB sab;
+} CAPMessage; </declaration>
+	<template>
+		<name x="5" y="5">GTSManager</name>
+		<parameter>int id, CAPMessage &amp;tx, CAPMessage &amp;rx, broadcast chan &amp;superframeEvent, chan &amp;check, ACT &amp;act[NODES], SAB &amp;sab, chan &amp;tx_chan, chan &amp;rx_chan, MLME &amp;mlme, MLMERequest &amp;mlmeRequest, MLMEIndication &amp;mlmeIndication, MLMEResponse &amp;mlmeResponse, MLMEConfirm &amp;mlmeConfirm, MLMECommStatus &amp;mlmeCommStatus, CAPIndicationChannel &amp;capInd, broadcast chan &amp;reset</parameter>
+		<declaration>clock waitingClock;
+GTSStatus cStatus;
+Address rID;
+SAB rSAB;
+ManType rMAN;
+
+void cleanup() {
+  rMAN = 0;
+  rSAB = 0;
+  rID = 0;
+  cStatus = 0;
+  waitingClock = 0;
+}
+
+void resetting() {
+  int slot;
+  cleanup();
+
+  for(slot = 0; slot &lt; SLOTS; slot++) {
+    act[id].states[slot] = 0;
+    act[id].idleSuperframeCounter[slot] = 0;
+    act[id].address[slot] = 0;
+  }
+
+  act[id].notFree = 0;
+
+  sab = 0;
+}
+
+void setACTState(ACTState newState) {
+    // TODO always the correct SAB?
+    int slot;
+    if(newState == ACT_FREE) {
+      act[id].notFree &amp;= negateSAB(rSAB);
+    }
+    else {
+      act[id].notFree |= rSAB;
+    }
+  
+    for(slot = 0; slot &lt; SLOTS; slot++) {
+      if(rSAB &amp; (1 &lt;&lt; slot)) {
+        act[id].states[slot] = newState;
+        if(newState == ACT_FREE) {
+          act[id].address[slot] = 0;
+          act[id].idleSuperframeCounter[slot] = 0;
+        }
+        else {
+          act[id].address[slot] = rID;
+        }
+        return; // do not expect another bit set
+      }
+    }
+}
+
+void update(ACTTrigger trigger) {
+  if(rMAN == MAN_ALLOCATION) {
+    if(trigger == ACT_REQUEST_ACCESS_FAILURE) {
+    }
+    else if(trigger == ACT_REQUEST_NO_ACK) {
+    }
+    else if(trigger == ACT_RESPONSE_TIMEOUT) {
+    }
+    else if(trigger == ACT_DISAPPROVED) {
+    }
+    else if(trigger == ACT_NOTIFY_ACCESS_FAILURE) {
+      if(improved) {
+        setACTState(ACT_INVALID);
+      }
+    }
+    else if(trigger == ACT_NOTIFY_DELIVERED) {
+      setACTState(ACT_ALLOCATED);
+    }
+    else if(trigger == ACT_DISAPPROVAL_ACCESS_FAILURE) {
+    }
+    else if(trigger == ACT_DISAPPROVAL_NO_ACK) {
+    }
+    else if(trigger == ACT_DISAPPROVAL_DELIVERED) {
+    }
+    else if(trigger == ACT_APPROVAL_ACCESS_FAILURE) {
+    }
+    else if(trigger == ACT_NOTIFY_TIMEOUT) {
+      if(improved) {
+        setACTState(ACT_INVALID);
+      }
+    }
+    else if(trigger == ACT_NOTIFY_RECEIVED) {
+      setACTState(ACT_ALLOCATED);
+    }
+  }
+  else if(rMAN == MAN_DEALLOCATION) {
+    if(trigger == ACT_REQUEST_ACCESS_FAILURE) {
+    }
+    else if(trigger == ACT_REQUEST_NO_ACK) {
+    }
+    else if(trigger == ACT_RESPONSE_TIMEOUT) {
+    }
+    else if(trigger == ACT_DISAPPROVED) {
+      // TODO test if it also works without (did before)
+      setACTState(ACT_FREE);
+    }
+    else if(trigger == ACT_NOTIFY_ACCESS_FAILURE) {
+    }
+    else if(trigger == ACT_NOTIFY_DELIVERED) {
+      setACTState(ACT_FREE);
+    }
+    else if(trigger == ACT_DISAPPROVAL_ACCESS_FAILURE) {
+    }
+    else if(trigger == ACT_DISAPPROVAL_NO_ACK) {
+    }
+    else if(trigger == ACT_DISAPPROVAL_DELIVERED) {
+    }
+    else if(trigger == ACT_APPROVAL_ACCESS_FAILURE) {
+      if(improved) {
+        setACTState(ACT_INVALID);
+      }
+    }
+    else if(trigger == ACT_NOTIFY_TIMEOUT) {
+      if(improved) {
+        setACTState(ACT_INVALID);
+      }
+    }
+    else if(trigger == ACT_NOTIFY_RECEIVED) {
+      setACTState(ACT_FREE);
+    }
+  }
+}
+
+bool isExpired(Slot slot) {
+  return (act[id].states[slot] == ACT_INVALID || act[id].states[slot] == ACT_UNCONFIRMED || act[id].idleSuperframeCounter[slot] &gt;= macDSMEGTSExpirationTime*SUPERFRAMES);
+}
+
+bool anyExpiration() {
+  int slot;
+  for(slot = 0; slot &lt; SLOTS; slot++) {
+    if(isExpired(slot)) {
+      return true;
+    }
+  }
+  return false;
+}
+</declaration>
+		<location id="id0" x="1056" y="-104">
+			<committed/>
+		</location>
+		<location id="id1" x="488" y="336">
+			<committed/>
+		</location>
+		<location id="id2" x="736" y="336">
+			<name x="576" y="320">SENT_DISAPPROVAL</name>
+		</location>
+		<location id="id3" x="328" y="32">
+			<committed/>
+		</location>
+		<location id="id4" x="1032" y="216">
+			<committed/>
+		</location>
+		<location id="id5" x="304" y="-8">
+			<name x="264" y="-64">CHECKING</name>
+			<committed/>
+		</location>
+		<location id="id6" x="-296" y="256"/>
+		<location id="id7" x="-296" y="-104">
+			<committed/>
+		</location>
+		<location id="id8" x="1112" y="496">
+			<committed/>
+		</location>
+		<location id="id9" x="-312" y="-8">
+			<committed/>
+		</location>
+		<location id="id10" x="1096" y="440">
+			<label kind="invariant" x="760" y="432">rx.cmd == NOTIFY_CMD &amp;&amp; rx.man == rMAN</label>
+			<committed/>
+		</location>
+		<location id="id11" x="1080" y="288">
+			<committed/>
+		</location>
+		<location id="id12" x="624" y="496">
+			<name x="632" y="504">WAIT_FOR_NOTIFY</name>
+			<label kind="invariant" x="632" y="520">waitingClock &lt;= macResponseWaitTime</label>
+		</location>
+		<location id="id13" x="-24" y="496">
+			<label kind="invariant" x="16" y="440">rx.cmd == RESPONSE_CMD
+&amp;&amp; rx.man == rMAN</label>
+			<committed/>
+		</location>
+		<location id="id14" x="832" y="136">
+			<name x="848" y="128">RECEIVING_REQUEST</name>
+			<label kind="invariant" x="822" y="151">rx.cmd == REQUEST_CMD</label>
+			<committed/>
+		</location>
+		<location id="id15" x="96" y="256">
+			<committed/>
+		</location>
+		<location id="id16" x="24" y="256">
+			<committed/>
+		</location>
+		<location id="id17" x="304" y="232">
+			<committed/>
+		</location>
+		<location id="id18" x="624" y="416">
+			<name x="568" y="384">SENT_APPROVAL</name>
+		</location>
+		<location id="id19" x="488" y="232">
+			<committed/>
+		</location>
+		<location id="id20" x="304" y="496">
+			<name x="312" y="504">WAIT_FOR_RESPONSE</name>
+			<label kind="invariant" x="312" y="520">waitingClock &lt;= macResponseWaitTime</label>
+		</location>
+		<location id="id21" x="304" y="392">
+			<name x="320" y="392">SENT_REQUEST</name>
+		</location>
+		<location id="id22" x="304" y="136">
+			<name x="256" y="128">IDLE</name>
+		</location>
+		<init ref="id22"/>
+		<transition>
+			<source ref="id10"/>
+			<target ref="id0"/>
+			<nail x="1096" y="-104"/>
+		</transition>
+		<transition>
+			<source ref="id2"/>
+			<target ref="id11"/>
+			<label kind="synchronisation" x="752" y="320">capInd[CAP_ACCESS_FAILURE]?</label>
+			<label kind="assignment" x="752" y="336">update(ACT_DISAPPROVAL_ACCESS_FAILURE)</label>
+			<nail x="1064" y="336"/>
+		</transition>
+		<transition>
+			<source ref="id1"/>
+			<target ref="id18"/>
+			<label kind="guard" x="496" y="368">cStatus == GTS_APPROVED</label>
+			<nail x="488" y="416"/>
+		</transition>
+		<transition>
+			<source ref="id1"/>
+			<target ref="id2"/>
+			<label kind="guard" x="504" y="336">cStatus == GTS_DISAPPROVED</label>
+		</transition>
+		<transition>
+			<source ref="id5"/>
+			<target ref="id3"/>
+			<label kind="synchronisation" x="336" y="0">check!</label>
+			<label kind="assignment" x="384" y="0">cleanup()</label>
+			<nail x="328" y="8"/>
+		</transition>
+		<transition>
+			<source ref="id4"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="376" y="-48">mlmeCommStatus[COMM_NO_ACK]!</label>
+			<nail x="1032" y="-32"/>
+			<nail x="328" y="-32"/>
+		</transition>
+		<transition>
+			<source ref="id2"/>
+			<target ref="id4"/>
+			<label kind="synchronisation" x="752" y="240">capInd[CAP_NO_ACK]?</label>
+			<label kind="assignment" x="752" y="256">update(ACT_DISAPPROVAL_NO_ACK)</label>
+			<nail x="736" y="256"/>
+			<nail x="1032" y="256"/>
+		</transition>
+		<transition>
+			<source ref="id22"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="176" y="88">superframeEvent?</label>
+		</transition>
+		<transition>
+			<source ref="id2"/>
+			<target ref="id0"/>
+			<label kind="synchronisation" x="752" y="280">capInd[CAP_SUCCESS]?</label>
+			<label kind="assignment" x="752" y="296">update(ACT_DISAPPROVAL_DELIVERED)</label>
+			<label kind="comments">There is no COMM_DENIED, so we can only report that the request itself was processed without failures.</label>
+			<nail x="752" y="296"/>
+			<nail x="1056" y="296"/>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id5"/>
+			<label kind="guard" x="-16" y="-80">cStatus == GTS_DISAPPROVED</label>
+			<label kind="synchronisation" x="-16" y="-64">mlmeConfirm!</label>
+			<label kind="assignment" x="-16" y="-48">mlme.gts_status = GTS_DISAPPROVED,
+update(ACT_DISAPPROVED)</label>
+			<nail x="-24" y="-80"/>
+			<nail x="232" y="-80"/>
+		</transition>
+		<transition>
+			<source ref="id7"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="-280" y="-120">mlmeConfirm!</label>
+			<label kind="assignment" x="-280" y="-104">update(ACT_NOTIFY_DELIVERED), mlme.gts_status = GTS_APPROVED</label>
+			<nail x="208" y="-104"/>
+		</transition>
+		<transition>
+			<source ref="id3"/>
+			<target ref="id22"/>
+			<label kind="select" x="472" y="40">slot : Slot</label>
+			<label kind="guard" x="472" y="56">isExpired(slot)</label>
+			<label kind="synchronisation" x="472" y="72">mlmeIndication[MAN_EXPIRATION]!</label>
+			<label kind="assignment" x="472" y="88">mlme.sab = 1 &lt;&lt; slot</label>
+			<label kind="comments">This should actually be sent by the other device via DSME GTS REQUEST, but why to send that extra message if we will deallocate anyway?</label>
+			<nail x="464" y="32"/>
+			<nail x="464" y="104"/>
+			<nail x="408" y="104"/>
+		</transition>
+		<transition>
+			<source ref="id3"/>
+			<target ref="id22"/>
+			<label kind="guard" x="336" y="64">!anyExpiration()</label>
+			<nail x="328" y="120"/>
+		</transition>
+		<transition>
+			<source ref="id6"/>
+			<target ref="id16"/>
+			<label kind="synchronisation" x="-280" y="240">capInd[CAP_ACCESS_FAILURE]?</label>
+			<label kind="assignment" x="-280" y="256">update(ACT_NOTIFY_ACCESS_FAILURE)</label>
+		</transition>
+		<transition>
+			<source ref="id0"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="376" y="-120">mlmeCommStatus[COMM_SUCCESS]!</label>
+			<nail x="376" y="-104"/>
+		</transition>
+		<transition>
+			<source ref="id6"/>
+			<target ref="id7"/>
+			<label kind="synchronisation" x="-288" y="128">capInd[CAP_SUCCESS]?</label>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id6"/>
+			<label kind="guard" x="-288" y="392">cStatus == GTS_APPROVED</label>
+			<label kind="synchronisation" x="-288" y="408">tx_chan!</label>
+			<label kind="assignment" x="-288" y="424">tx.cmd = NOTIFY_CMD,
+tx.address = id,
+tx.man = rMAN,
+tx.status = GTS_APPROVED,
+tx.sab = rSAB</label>
+			<nail x="-296" y="496"/>
+		</transition>
+		<transition>
+			<source ref="id8"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="376" y="-96">mlmeCommStatus[COMM_TRANSACTION_EXPIRED]!</label>
+			<nail x="1112" y="-80"/>
+			<nail x="360" y="-80"/>
+		</transition>
+		<transition>
+			<source ref="id12"/>
+			<target ref="id8"/>
+			<label kind="guard" x="592" y="544">waitingClock &gt;= macResponseWaitTime</label>
+			<label kind="assignment" x="888" y="544">update(ACT_NOTIFY_TIMEOUT)</label>
+			<nail x="624" y="544"/>
+			<nail x="1112" y="544"/>
+		</transition>
+		<transition>
+			<source ref="id9"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="-280" y="-24">mlmeConfirm!</label>
+			<label kind="assignment" x="-280" y="-8">mlme.gts_status = GTS_NO_DATA</label>
+		</transition>
+		<transition>
+			<source ref="id20"/>
+			<target ref="id9"/>
+			<label kind="guard" x="-296" y="544">waitingClock &gt;= macResponseWaitTime</label>
+			<label kind="assignment" x="8" y="544">update(ACT_RESPONSE_TIMEOUT)</label>
+			<nail x="304" y="544"/>
+			<nail x="-312" y="544"/>
+		</transition>
+		<transition>
+			<source ref="id12"/>
+			<target ref="id10"/>
+			<label kind="synchronisation" x="664" y="448">rx_chan?</label>
+			<label kind="assignment" x="664" y="464">rID = rx.address, cStatus = rx.status, rSAB = rx.sab,
+update(ACT_NOTIFY_RECEIVED)</label>
+			<nail x="1096" y="496"/>
+		</transition>
+		<transition>
+			<source ref="id11"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="376" y="-72">mlmeCommStatus[COMM_ACCESS_FAILURE]!</label>
+			<nail x="1080" y="-56"/>
+			<nail x="344" y="-56"/>
+		</transition>
+		<transition>
+			<source ref="id18"/>
+			<target ref="id11"/>
+			<label kind="synchronisation" x="696" y="384">capInd[CAP_ACCESS_FAILURE]?</label>
+			<label kind="assignment" x="696" y="400">update(ACT_APPROVAL_ACCESS_FAILURE)</label>
+			<nail x="1080" y="416"/>
+		</transition>
+		<transition>
+			<source ref="id18"/>
+			<target ref="id12"/>
+			<label kind="synchronisation" x="456" y="432">capInd[CAP_SUCCESS]?</label>
+			<label kind="assignment" x="496" y="448">waitingClock = 0</label>
+		</transition>
+		<transition>
+			<source ref="id20"/>
+			<target ref="id13"/>
+			<label kind="synchronisation" x="8" y="480">rx_chan?</label>
+			<label kind="assignment" x="8" y="496">rID := rx.address, cStatus := rx.status,
+rSAB := rx.sab</label>
+		</transition>
+		<transition>
+			<source ref="id14"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="376" y="-24">mlmeIndication[rMAN]!</label>
+			<label kind="assignment" x="552" y="-24">mlme.sab = rSAB</label>
+			<nail x="832" y="-8"/>
+			<nail x="344" y="-8"/>
+		</transition>
+		<transition>
+			<source ref="id22"/>
+			<target ref="id14"/>
+			<label kind="synchronisation" x="392" y="136">rx_chan?</label>
+			<label kind="assignment" x="392" y="152">rMAN := rx.man, rSAB := rx.sab</label>
+		</transition>
+		<transition>
+			<source ref="id15"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="104" y="64">mlmeConfirm!</label>
+			<label kind="assignment" x="48" y="48">mlme.gts_status = GTS_NO_ACK</label>
+			<nail x="96" y="64"/>
+			<nail x="288" y="64"/>
+		</transition>
+		<transition>
+			<source ref="id21"/>
+			<target ref="id15"/>
+			<label kind="synchronisation" x="104" y="336">capInd[CAP_NO_ACK]?</label>
+			<label kind="assignment" x="56" y="352">update(ACT_REQUEST_NO_ACK)</label>
+			<nail x="288" y="352"/>
+			<nail x="96" y="352"/>
+		</transition>
+		<transition>
+			<source ref="id16"/>
+			<target ref="id5"/>
+			<label kind="synchronisation" x="-8" y="0">mlmeConfirm!</label>
+			<label kind="assignment" x="-8" y="16">mlme.gts_status = GTS_ACCESS_FAILURE</label>
+			<nail x="24" y="32"/>
+			<nail x="288" y="32"/>
+		</transition>
+		<transition>
+			<source ref="id21"/>
+			<target ref="id16"/>
+			<label kind="synchronisation" x="32" y="376">capInd[CAP_ACCESS_FAILURE]?</label>
+			<label kind="assignment" x="0" y="392">update(ACT_REQUEST_ACCESS_FAILURE)</label>
+			<nail x="24" y="392"/>
+		</transition>
+		<transition>
+			<source ref="id17"/>
+			<target ref="id21"/>
+			<label kind="synchronisation" x="312" y="248">tx_chan!</label>
+			<label kind="assignment" x="128" y="248">tx.cmd = REQUEST_CMD,
+tx.address = id,
+tx.man = rMAN,
+tx.status = GTS_X,
+tx.sab = mlme.sab</label>
+		</transition>
+		<transition>
+			<source ref="id22"/>
+			<target ref="id17"/>
+			<label kind="select" x="144" y="160">rxMAN : ManType</label>
+			<label kind="synchronisation" x="144" y="176">mlmeRequest[rxMAN]?</label>
+			<label kind="assignment" x="144" y="192">rMAN := rxMAN</label>
+		</transition>
+		<transition>
+			<source ref="id19"/>
+			<target ref="id1"/>
+			<label kind="synchronisation" x="424" y="248">tx_chan!</label>
+			<label kind="assignment" x="496" y="248">tx.cmd = RESPONSE_CMD,
+tx.address = id,
+tx.man = rMAN,
+tx.status =cStatus,
+tx.sab = rSAB</label>
+		</transition>
+		<transition>
+			<source ref="id22"/>
+			<target ref="id19"/>
+			<label kind="select" x="496" y="176">rxMAN : ManType</label>
+			<label kind="synchronisation" x="496" y="192">mlmeResponse[rxMAN]?</label>
+			<label kind="assignment" x="496" y="208">rMAN := rxMAN, cStatus := mlme.gts_status, rSAB := mlme.sab</label>
+			<nail x="376" y="176"/>
+			<nail x="488" y="176"/>
+		</transition>
+		<transition>
+			<source ref="id21"/>
+			<target ref="id20"/>
+			<label kind="synchronisation" x="312" y="448">capInd[CAP_SUCCESS]?</label>
+			<label kind="assignment" x="312" y="464">waitingClock = 0</label>
+		</transition>
+		<transition>
+			<source ref="id0"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id1"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id2"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id3"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id4"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id5"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id6"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id7"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id8"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id9"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id10"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id11"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id12"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id14"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id15"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id16"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id17"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id18"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id19"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id20"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id21"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id22"/>
+			<target ref="id22"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+	</template>
+	<template>
+		<name>CAPTransmission</name>
+		<parameter>clock &amp;gC, CAPMessage &amp;msg, chan &amp;msg_chan_in, chan &amp;msg_chan_out, CAPIndicationChannel &amp;csmaInd, broadcast chan &amp;reset</parameter>
+		<declaration>clock sendingClock;
+
+void cleanup() {
+  sendingClock = 0;
+  msg.status = 0;
+  msg.address = 0;
+  msg.cmd = 0;
+  msg.man = 0;
+  msg.sab = 0;
+}
+
+void resetting() {
+  cleanup();
+}
+
+bool isBroadcast() {
+  return (msg.cmd == RESPONSE_CMD || msg.cmd == NOTIFY_CMD) &amp;&amp; msg.status == GTS_APPROVED;
+}
+</declaration>
+		<location id="id23" x="8" y="-120">
+			<committed/>
+		</location>
+		<location id="id24" x="-152" y="-32">
+			<committed/>
+		</location>
+		<location id="id25" x="-152" y="-64">
+			<label kind="comments">Without these states, the transition will not be executed if the channel is not r, so missing transitions are not detected.</label>
+			<committed/>
+		</location>
+		<location id="id26" x="400" y="-328">
+			<committed/>
+		</location>
+		<location id="id27" x="376" y="-272">
+			<committed/>
+		</location>
+		<location id="id28" x="8" y="-184">
+			<name x="24" y="-192">SEND_DELAY</name>
+			<label kind="invariant" x="24" y="-176">sendingClock &lt;= Tmax</label>
+		</location>
+		<location id="id29" x="400" y="-120">
+			<name x="224" y="-136">MESSAGE_DELIVERED</name>
+			<committed/>
+		</location>
+		<location id="id30" x="8" y="-64">
+			<name x="24" y="-80">SENDING</name>
+			<label kind="invariant" x="24" y="-64">gC &lt; 9*SYMBOLS_PER_SLOT</label>
+		</location>
+		<location id="id31" x="8" y="-312">
+			<name x="16" y="-304">IDLE</name>
+		</location>
+		<init ref="id31"/>
+		<transition>
+			<source ref="id23"/>
+			<target ref="id30"/>
+			<label kind="guard" x="16" y="-112">gC &gt;= SYMBOLS_PER_SLOT and 
+gC &lt; 9*SYMBOLS_PER_SLOT - SYMBOLS_PER_PACKET</label>
+		</transition>
+		<transition>
+			<source ref="id30"/>
+			<target ref="id24"/>
+			<label kind="guard" x="-120" y="-48">isBroadcast()</label>
+			<nail x="-16" y="-32"/>
+		</transition>
+		<transition>
+			<source ref="id30"/>
+			<target ref="id25"/>
+			<label kind="guard" x="-128" y="-80">not isBroadcast()</label>
+		</transition>
+		<transition>
+			<source ref="id29"/>
+			<target ref="id26"/>
+			<label kind="assignment" x="328" y="-312">cleanup()</label>
+		</transition>
+		<transition>
+			<source ref="id29"/>
+			<target ref="id27"/>
+			<label kind="guard" x="256" y="-192">not isBroadcast()</label>
+			<label kind="assignment" x="256" y="-176">cleanup()</label>
+			<nail x="376" y="-152"/>
+		</transition>
+		<transition>
+			<source ref="id28"/>
+			<target ref="id23"/>
+			<label kind="guard" x="-112" y="-160">sendingClock &gt;= CCA_DURATION</label>
+		</transition>
+		<transition>
+			<source ref="id31"/>
+			<target ref="id28"/>
+			<label kind="synchronisation" x="16" y="-256">msg_chan_in?</label>
+			<label kind="assignment" x="16" y="-240">sendingClock := 0</label>
+		</transition>
+		<transition>
+			<source ref="id24"/>
+			<target ref="id31"/>
+			<label kind="synchronisation" x="-248" y="-336">csmaInd[CAP_SUCCESS]!</label>
+			<label kind="assignment" x="-240" y="-48">cleanup()</label>
+			<nail x="-264" y="-32"/>
+			<nail x="-264" y="-320"/>
+			<nail x="-24" y="-320"/>
+		</transition>
+		<transition>
+			<source ref="id25"/>
+			<target ref="id31"/>
+			<label kind="synchronisation" x="-248" y="-320">csmaInd[CAP_NO_ACK]!</label>
+			<label kind="assignment" x="-240" y="-80">cleanup()</label>
+			<nail x="-256" y="-64"/>
+			<nail x="-256" y="-304"/>
+			<nail x="-24" y="-304"/>
+		</transition>
+		<transition>
+			<source ref="id26"/>
+			<target ref="id31"/>
+			<label kind="synchronisation" x="120" y="-344">csmaInd[CAP_SUCCESS]!</label>
+			<nail x="56" y="-328"/>
+		</transition>
+		<transition>
+			<source ref="id27"/>
+			<target ref="id31"/>
+			<label kind="synchronisation" x="120" y="-288">csmaInd[CAP_NO_ACK]!</label>
+			<nail x="112" y="-272"/>
+			<nail x="96" y="-312"/>
+		</transition>
+		<transition>
+			<source ref="id30"/>
+			<target ref="id29"/>
+			<label kind="synchronisation" x="160" y="-48">msg_chan_out!</label>
+			<nail x="32" y="-32"/>
+			<nail x="400" y="-32"/>
+		</transition>
+		<transition>
+			<source ref="id23"/>
+			<target ref="id31"/>
+			<label kind="synchronisation" x="-248" y="-304">csmaInd[CAP_ACCESS_FAILURE]!</label>
+			<label kind="assignment" x="-240" y="-136">cleanup()</label>
+			<nail x="-248" y="-120"/>
+			<nail x="-248" y="-288"/>
+			<nail x="-16" y="-288"/>
+		</transition>
+		<transition>
+			<source ref="id23"/>
+			<target ref="id31"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id24"/>
+			<target ref="id31"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id25"/>
+			<target ref="id31"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id26"/>
+			<target ref="id31"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id27"/>
+			<target ref="id31"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id28"/>
+			<target ref="id31"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id29"/>
+			<target ref="id31"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id30"/>
+			<target ref="id31"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id31"/>
+			<target ref="id31"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+	</template>
+	<template>
+		<name>GTSAllocationHelper</name>
+		<parameter>int id, MLME &amp;mlme, chan &amp;check, ACT &amp;act[NODES], SAB &amp;sab, MLMERequest &amp;mlmeRequest, MLMEIndication &amp;mlmeIndication, MLMEResponse &amp;mlmeResponse, MLMEConfirm &amp;mlmeConfirm, MLMECommStatus &amp;mlmeCommStatus, broadcast chan &amp;reset</parameter>
+		<declaration>void cleanup() {
+  mlme.sab = 0;
+  mlme.gts_status = 0;
+}
+
+void resetting() {
+  cleanup();
+}
+
+bool isAllocationPossible(Slot slot) {
+  bool freeForMe = (((1 &lt;&lt; slot) &amp; sab) == 0) &amp;&amp; (act[id].states[slot] == false);
+  bool freeForOther = ((1 &lt;&lt; slot) &amp; mlme.sab) == 0;
+  return freeForMe &amp;&amp; freeForOther;
+}
+
+bool anyAllocationPossible() {
+  return (negateSAB(act[id].notFree) &amp; negateSAB(mlme.sab) &amp; negateSAB(sab)) != 0;
+}
+
+bool deallocationPossible() {
+  return (act[id].notFree &amp; mlme.sab) != 0;
+  // Does not check if the slot is actually allocated with this node
+}
+
+void setInvalid() {
+  int slot;
+  
+  for(slot = 0; slot &lt; SLOTS; slot++) {
+    if(mlme.sab &amp; (1 &lt;&lt; slot)) {
+      act[id].states[slot] = ACT_INVALID;
+      return; // do not expect another bit set
+    }
+  }
+}
+
+bool freeSlots() {
+  return MAX_SAB_VALUE != act[id].notFree;
+}</declaration>
+		<location id="id32" x="-72" y="-64">
+			<committed/>
+		</location>
+		<location id="id33" x="16" y="104">
+			<committed/>
+		</location>
+		<location id="id34" x="432" y="-104">
+			<committed/>
+		</location>
+		<location id="id35" x="120" y="64">
+			<committed/>
+		</location>
+		<location id="id36" x="-560" y="-64">
+			<committed/>
+		</location>
+		<location id="id37" x="-72" y="104"/>
+		<location id="id38" x="-72" y="0">
+			<name x="-120" y="8">IDLE</name>
+		</location>
+		<init ref="id38"/>
+		<transition>
+			<source ref="id32"/>
+			<target ref="id38"/>
+			<label kind="assignment" x="-144" y="-40">cleanup()</label>
+		</transition>
+		<transition>
+			<source ref="id33"/>
+			<target ref="id37"/>
+			<label kind="synchronisation" x="-48" y="88">check!</label>
+		</transition>
+		<transition>
+			<source ref="id34"/>
+			<target ref="id32"/>
+			<label kind="guard" x="-32" y="-80">deallocationPossible()</label>
+			<label kind="synchronisation" x="-32" y="-64">mlmeResponse[MAN_DEALLOCATION]!</label>
+			<label kind="assignment" x="128" y="-80">mlme.gts_status = GTS_APPROVED</label>
+			<nail x="416" y="-64"/>
+			<nail x="-48" y="-64"/>
+		</transition>
+		<transition>
+			<source ref="id34"/>
+			<target ref="id32"/>
+			<label kind="guard" x="-48" y="-120">!deallocationPossible()</label>
+			<label kind="synchronisation" x="-48" y="-104">mlmeResponse[MAN_DEALLOCATION]!</label>
+			<label kind="assignment" x="128" y="-120">mlme.gts_status = GTS_DISAPPROVED</label>
+			<nail x="-48" y="-104"/>
+		</transition>
+		<transition>
+			<source ref="id38"/>
+			<target ref="id34"/>
+			<label kind="synchronisation" x="56" y="0">mlmeIndication[MAN_DEALLOCATION]?</label>
+			<nail x="32" y="0"/>
+			<nail x="432" y="0"/>
+		</transition>
+		<transition>
+			<source ref="id35"/>
+			<target ref="id33"/>
+			<label kind="synchronisation" x="128" y="72">mlmeRequest[MAN_DEALLOCATION]!</label>
+			<label kind="assignment" x="128" y="88">setInvalid()</label>
+			<nail x="120" y="104"/>
+		</transition>
+		<transition>
+			<source ref="id38"/>
+			<target ref="id35"/>
+			<label kind="synchronisation" x="128" y="32">mlmeIndication[MAN_EXPIRATION]?</label>
+			<nail x="-32" y="24"/>
+			<nail x="120" y="24"/>
+		</transition>
+		<transition>
+			<source ref="id38"/>
+			<target ref="id32"/>
+			<label kind="select" x="-32" y="-40">status : CommStatus</label>
+			<label kind="synchronisation" x="120" y="-40">mlmeCommStatus[status]?</label>
+			<nail x="-40" y="-24"/>
+			<nail x="-40" y="-40"/>
+		</transition>
+		<transition>
+			<source ref="id36"/>
+			<target ref="id32"/>
+			<label kind="select" x="-544" y="-136">slot : Slot</label>
+			<label kind="guard" x="-464" y="-136">isAllocationPossible(slot)</label>
+			<label kind="synchronisation" x="-544" y="-120">mlmeResponse[MAN_ALLOCATION]!</label>
+			<label kind="assignment" x="-544" y="-104">mlme.gts_status = GTS_APPROVED, mlme.sab = 1 &lt;&lt; slot</label>
+			<nail x="-560" y="-104"/>
+			<nail x="-88" y="-104"/>
+		</transition>
+		<transition>
+			<source ref="id36"/>
+			<target ref="id32"/>
+			<label kind="guard" x="-544" y="-80">!anyAllocationPossible()</label>
+			<label kind="synchronisation" x="-544" y="-64">mlmeResponse[MAN_ALLOCATION]!</label>
+			<label kind="assignment" x="-544" y="-48">mlme.gts_status = GTS_DISAPPROVED,
+mlme.sab = 0</label>
+			<nail x="-128" y="-64"/>
+		</transition>
+		<transition>
+			<source ref="id38"/>
+			<target ref="id36"/>
+			<label kind="synchronisation" x="-544" y="0">mlmeIndication[MAN_ALLOCATION]?</label>
+			<nail x="-104" y="0"/>
+			<nail x="-560" y="0"/>
+		</transition>
+		<transition>
+			<source ref="id37"/>
+			<target ref="id32"/>
+			<label kind="synchronisation" x="-360" y="56">mlmeConfirm?</label>
+			<nail x="-248" y="104"/>
+			<nail x="-248" y="40"/>
+			<nail x="-160" y="-48"/>
+			<nail x="-104" y="-48"/>
+		</transition>
+		<transition>
+			<source ref="id38"/>
+			<target ref="id37"/>
+			<label kind="guard" x="-216" y="32">freeSlots()</label>
+			<label kind="synchronisation" x="-216" y="48">mlmeRequest[MAN_ALLOCATION]!</label>
+			<label kind="assignment" x="-216" y="64">mlme.sab = sab</label>
+		</transition>
+		<transition>
+			<source ref="id32"/>
+			<target ref="id38"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id33"/>
+			<target ref="id38"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id34"/>
+			<target ref="id38"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id35"/>
+			<target ref="id38"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id36"/>
+			<target ref="id38"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id37"/>
+			<target ref="id38"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+		<transition>
+			<source ref="id38"/>
+			<target ref="id38"/>
+			<label kind="synchronisation">reset?</label>
+			<label kind="assignment">resetting()</label>
+		</transition>
+	</template>
+	<template>
+		<name>Observer</name>
+		<parameter>chan &amp;check, broadcast chan &amp;superframeEvent, ACT &amp;act[NODES], SAB &amp;sab[NODES]</parameter>
+		<declaration>SuperframeCounter inconsistentFor;
+
+bool isConsistent() {
+  int i;
+  for(i = 0; i &lt; SLOTS; i++) {
+    if(act[0].states[i] == ACT_ALLOCATED &amp;&amp; act[1].states[i] == ACT_FREE) {
+	return false;
+    }
+
+    if(act[1].states[i] == ACT_ALLOCATED &amp;&amp; act[0].states[i] == ACT_FREE) {
+	return false;
+    }
+  }
+
+  return true;
+}
+</declaration>
+		<location id="id39" x="256" y="0">
+			<name x="272" y="-8">INCONSISTENT</name>
+		</location>
+		<location id="id40" x="0" y="0">
+			<name x="-104" y="-8">CONSISTENT</name>
+		</location>
+		<init ref="id40"/>
+		<transition>
+			<source ref="id39"/>
+			<target ref="id39"/>
+			<label kind="synchronisation" x="216" y="-80">superframeEvent?</label>
+			<label kind="assignment" x="216" y="-64">inconsistentFor++</label>
+			<nail x="272" y="-48"/>
+			<nail x="248" y="-48"/>
+		</transition>
+		<transition>
+			<source ref="id39"/>
+			<target ref="id39"/>
+			<label kind="guard" x="280" y="-40">!isConsistent()</label>
+			<label kind="synchronisation" x="288" y="24">check?</label>
+			<nail x="280" y="24"/>
+			<nail x="392" y="24"/>
+			<nail x="392" y="-24"/>
+			<nail x="280" y="-24"/>
+		</transition>
+		<transition>
+			<source ref="id40"/>
+			<target ref="id40"/>
+			<label kind="guard" x="-120" y="-40">isConsistent()</label>
+			<label kind="synchronisation" x="-72" y="24">check?</label>
+			<nail x="-16" y="24"/>
+			<nail x="-128" y="24"/>
+			<nail x="-128" y="-24"/>
+			<nail x="-16" y="-24"/>
+		</transition>
+		<transition>
+			<source ref="id39"/>
+			<target ref="id40"/>
+			<label kind="guard" x="40" y="-40">isConsistent()</label>
+			<label kind="synchronisation" x="40" y="-24">check?</label>
+			<label kind="assignment" x="96" y="-24">inconsistentFor = 0</label>
+			<nail x="232" y="-24"/>
+			<nail x="24" y="-24"/>
+		</transition>
+		<transition>
+			<source ref="id40"/>
+			<target ref="id39"/>
+			<label kind="guard" x="40" y="8">!isConsistent()</label>
+			<label kind="synchronisation" x="40" y="24">check?</label>
+			<label kind="assignment" x="96" y="24">inconsistentFor = 0</label>
+			<nail x="16" y="24"/>
+			<nail x="224" y="24"/>
+		</transition>
+	</template>
+	<template>
+		<name>GlobalClock</name>
+		<parameter>clock &amp;gC, broadcast chan &amp;superframeEvent, ACT &amp;act[NODES]</parameter>
+		<declaration>void incrementSlotCounters() {
+  int slot;
+  int id;
+  for(id = 0; id &lt; NODES; id++) {
+    for(slot = 0; slot &lt; SLOTS; slot++) {
+      int address = act[id].address[slot];
+      // Instead of actually sending the messages, we model failed transmissions during the GTS just by comparing the ACTs.
+      // If the slot is allocated at both sides, we assume no message gets lost.
+      if(act[id].states[slot] == ACT_ALLOCATED &amp;&amp; act[address].states[slot] != ACT_ALLOCATED &amp;&amp; act[id].idleSuperframeCounter[slot] &lt; macDSMEGTSExpirationTime*SUPERFRAMES) {
+        act[id].idleSuperframeCounter[slot]++;
+      }
+    }
+  }
+}</declaration>
+		<location id="id41" x="184" y="232">
+			<name x="152" y="184">CFP</name>
+			<label kind="invariant" x="-40" y="200">gC &lt;= 16*SYMBOLS_PER_SLOT</label>
+		</location>
+		<location id="id42" x="-96" y="232">
+			<name x="-136" y="208">CAP</name>
+			<label kind="invariant" x="-320" y="224">gC &lt;= 9*SYMBOLS_PER_SLOT</label>
+		</location>
+		<location id="id43" x="-96" y="128">
+			<name x="-168" y="104">BEACON</name>
+			<label kind="invariant" x="-304" y="120">gC &lt;= SYMBOLS_PER_SLOT</label>
+		</location>
+		<init ref="id43"/>
+		<transition>
+			<source ref="id41"/>
+			<target ref="id43"/>
+			<label kind="guard" x="-56" y="128">gC &gt;= 16*SYMBOLS_PER_SLOT</label>
+			<label kind="synchronisation" x="-56" y="96">superframeEvent!</label>
+			<label kind="assignment" x="-56" y="112">incrementSlotCounters(), gC := 0</label>
+			<nail x="184" y="128"/>
+		</transition>
+		<transition>
+			<source ref="id42"/>
+			<target ref="id41"/>
+			<label kind="guard" x="-64" y="232">gC &gt;= 9*SYMBOLS_PER_SLOT</label>
+		</transition>
+		<transition>
+			<source ref="id43"/>
+			<target ref="id42"/>
+			<label kind="guard" x="-296" y="168">gC &gt;= SYMBOLS_PER_SLOT</label>
+		</transition>
+	</template>
+	<template>
+		<name>Resetter</name>
+		<parameter>chan &amp;check, broadcast chan &amp;reset</parameter>
+		<location id="id44" x="48" y="0">
+			<committed/>
+		</location>
+		<location id="id45" x="0" y="0"/>
+		<init ref="id45"/>
+		<transition>
+			<source ref="id44"/>
+			<target ref="id45"/>
+			<label kind="synchronisation" x="-16" y="-56">check!</label>
+			<nail x="48" y="-40"/>
+		</transition>
+		<transition>
+			<source ref="id45"/>
+			<target ref="id44"/>
+			<label kind="synchronisation" x="-16" y="24">reset!</label>
+			<nail x="48" y="40"/>
+		</transition>
+	</template>
+	<system>ACT act[NODES];
+SAB sab[NODES];
+chan TX[NODES];
+chan RX[NODES];
+CAPIndicationChannel csmaInd[NODES];
+MLMERequest mlmeRequest[NODES];
+MLMEIndication mlmeIndication[NODES];
+MLMEResponse mlmeResponse[NODES];
+MLMEConfirm mlmeConfirm[NODES];
+MLMECommStatus mlmeCommStatus[NODES];
+chan check; // check always directly after writing to the ACT
+broadcast chan superframeEvent;
+clock gC;
+MLME mlme[NODES];
+CAPMessage msg[NODES];
+broadcast chan reset[NODES];
+
+observer = Observer(check, superframeEvent, act, sab);
+globalClock = GlobalClock(gC, superframeEvent, act);
+
+helper0 = GTSAllocationHelper(0,mlme[0],check,act,sab[0],mlmeRequest[0],mlmeIndication[0],mlmeResponse[0],mlmeConfirm[0],mlmeCommStatus[0],reset[0]);
+gts0 = GTSManager(0,msg[0],msg[1],superframeEvent,check,act,sab[0],TX[0],RX[0],mlme[0],mlmeRequest[0],mlmeIndication[0],mlmeResponse[0],mlmeConfirm[0],mlmeCommStatus[0],csmaInd[0],reset[0]);
+cap0 = CAPTransmission(gC,msg[0],TX[0],RX[1],csmaInd[0],reset[0]);
+resetter0 = Resetter(check,reset[0]);
+
+helper1 = GTSAllocationHelper(1,mlme[1],check,act,sab[1],mlmeRequest[1],mlmeIndication[1],mlmeResponse[1],mlmeConfirm[1],mlmeCommStatus[1],reset[1]);
+gts1 = GTSManager(1,msg[1],msg[0],superframeEvent,check,act,sab[1],TX[1],RX[1],mlme[1],mlmeRequest[1],mlmeIndication[1],mlmeResponse[1],mlmeConfirm[1],mlmeCommStatus[1],csmaInd[1],reset[1]);
+cap1 = CAPTransmission(gC,msg[1],TX[1],RX[0],csmaInd[1],reset[1]);
+resetter1 = Resetter(check,reset[1]);
+
+system helper0, gts0, cap0, cap1, gts1, helper1, observer, globalClock, resetter0, resetter1;
+</system>
+</nta>
+
